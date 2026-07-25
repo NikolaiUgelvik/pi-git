@@ -24,6 +24,14 @@ Normal Git operations stay local. The model is only involved when you explicitly
 
 ## Install
 
+Install the packaged extension from npm:
+
+```bash
+pi install npm:pi-git-tui
+```
+
+Or directly from GitHub:
+
 ```bash
 pi install git:github.com/NikolaiUgelvik/pi-git-tui
 ```
@@ -179,6 +187,18 @@ npm run verify:build
 Git installs use the committed `dist/` tree. `npm run verify:build` performs an isolated clean rebuild and byte-compares all production files so stale or mixed output fails before release.
 
 Performance fixtures are available through `benchmark:git`, `benchmark:render`, `benchmark:load`, and `benchmark:loop`.
+
+## Release
+
+Publishing is triggered by publishing a GitHub release whose tag matches the
+version in `package.json` (for example, `v0.1.0`). The repository must be
+configured as a trusted publisher for `pi-git-tui` on npmjs.com.
+
+## License
+
+Copyright 2026 Nikolai Ugelvik.
+
+This project is licensed under the [Apache License, Version 2.0](LICENSE).
 
 ## Limitations
 
