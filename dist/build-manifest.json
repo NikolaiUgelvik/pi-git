@@ -15,7 +15,7 @@
     {
       "path": "package.json",
       "bytes": 3274,
-      "sha256": "12d7c264fb978fc470b8e2ff145cff53235638a97660bc38e7f6bd7181356079"
+      "sha256": "2f71dbff9757092cb6ab02a2bb6d61b0cbc7bd685528c2fbbdfc365842ee0f57"
     },
     {
       "path": "scripts/build-metadata.mjs",

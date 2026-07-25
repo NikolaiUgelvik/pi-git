@@ -1,6 +1,6 @@
 {
   "name": "pi-git-tui",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Interactive Git diff, staging, history, and commit TUI for Pi.",
   "type": "module",
   "keywords": [
