@@ -45,8 +45,5 @@ jobs:
       - name: Check package
         run: npm run check
 
-      - name: Build and verify package
-        run: npm run prepack
-
       - name: Publish package
         run: npm publish --access public

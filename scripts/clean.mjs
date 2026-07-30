@@ -4,14 +4,13 @@ import { fileURLToPath } from "node:url"
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 const directories = new Map([
-  ["--build", "dist"],
   ["--coverage", ".tmp-coverage"],
   ["--tests", ".tmp-tests"],
   ["--typecheck", ".tmp-typecheck"],
 ])
 
 try {
-  const requestedTargets = process.argv.length > 2 ? process.argv.slice(2) : ["--build"]
+  const requestedTargets = process.argv.length > 2 ? process.argv.slice(2) : [...directories.keys()]
   const targets = new Set(
     requestedTargets.map((target) => {
       const directory = directories.get(target)

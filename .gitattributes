@@ -1,5 +1,4 @@
 /.gitattributes text eol=lf
-/dist/** text eol=lf
 /extensions/** text eol=lf
 /src/** text eol=lf
 /scripts/** text eol=lf

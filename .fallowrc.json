@@ -8,7 +8,7 @@
     "benchmarks/git-memory-child.mjs",
     "benchmarks/render-memory-child.mjs"
   ],
-  "ignorePatterns": ["dist/**", "node_modules/**", ".cache/**", ".tmp-coverage/**", "coverage/**"],
+  "ignorePatterns": ["node_modules/**", ".cache/**", ".tmp-coverage/**", "coverage/**"],
   "includeEntryExports": true,
   "duplicates": {
     "mode": "strict",

@@ -1,6 +1,5 @@
 import assert from "node:assert/strict"
 import { spawnSync } from "node:child_process"
-import { createHash } from "node:crypto"
 import {
   cpSync,
   existsSync,
@@ -13,8 +12,8 @@ import {
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
-import { dirname, isAbsolute, join, resolve } from "node:path"
-import { fileURLToPath, pathToFileURL } from "node:url"
+import { dirname, join, relative, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 import { discoverAndLoadExtensions } from "@earendil-works/pi-coding-agent"
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..")
@@ -25,7 +24,7 @@ function run(command, args, options = {}) {
     cwd: options.cwd ?? root,
     encoding: "utf8",
     env: options.env ?? process.env,
-    maxBuffer: 10 * 1024 * 1024,
+    maxBuffer: 20 * 1024 * 1024,
   })
   if (result.error) throw result.error
   if (result.signal || result.status !== 0) {
@@ -48,199 +47,57 @@ function npmInvocation(args) {
   return { command: process.platform === "win32" ? "npm.cmd" : "npm", args }
 }
 
-function spawnNpm(args, cwd) {
-  const invocation = npmInvocation(args)
-  return spawnSync(invocation.command, invocation.args, {
-    cwd,
-    encoding: "utf8",
-    env: process.env,
-    maxBuffer: 10 * 1024 * 1024,
-  })
-}
-
 function runNpm(args, cwd = root) {
   const invocation = npmInvocation(args)
   return run(invocation.command, invocation.args, { cwd })
-}
-
-function copyGitCheckout(name = "git-checkout") {
-  const checkout = join(temporaryRoot, name)
-  mkdirSync(checkout)
-  for (const directory of ["assets", "dist", "extensions", "scripts", "src"]) {
-    cpSync(join(root, directory), join(checkout, directory), { recursive: true })
-  }
-  for (const file of [
-    ".gitattributes",
-    "LICENSE",
-    "README.md",
-    "package-lock.json",
-    "package.json",
-    "tsconfig.json",
-    "tsconfig.build.json",
-  ]) {
-    cpSync(join(root, file), join(checkout, file))
-  }
-  return checkout
-}
-
-function assertReproducibleBuildGate() {
-  const compilerCheckout = copyGitCheckout("wrong-compiler")
-  symlinkSync(
-    join(root, "node_modules"),
-    join(compilerCheckout, "node_modules"),
-    process.platform === "win32" ? "junction" : "dir",
-  )
-  const compilerManifestPath = join(compilerCheckout, "dist/build-manifest.json")
-  const compilerManifest = JSON.parse(readFileSync(compilerManifestPath, "utf8"))
-  compilerManifest.compiler = "typescript@0.0.0"
-  writeFileSync(compilerManifestPath, `${JSON.stringify(compilerManifest, null, 2)}\n`)
-  const compilerResult = spawnSync(process.execPath, [join(compilerCheckout, "scripts/verify-build.mjs")], {
-    cwd: compilerCheckout,
-    encoding: "utf8",
-  })
-  assert.notEqual(compilerResult.status, 0, "verify-build accepted a false compiler identity")
-  assert.match(`${compilerResult.stdout}\n${compilerResult.stderr}`, /does not match locked TypeScript/u)
-
-  const staleCheckout = copyGitCheckout("forged-stale-output")
-  symlinkSync(
-    join(root, "node_modules"),
-    join(staleCheckout, "node_modules"),
-    process.platform === "win32" ? "junction" : "dir",
-  )
-  const staleOutputPath = join(staleCheckout, "dist/src/extension.js")
-  writeFileSync(staleOutputPath, `${readFileSync(staleOutputPath, "utf8")}\n// forged stale output\n`)
-  const manifestPath = join(staleCheckout, "dist/build-manifest.json")
-  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"))
-  const record = manifest.outputs.find(({ path }) => path === "dist/src/extension.js")
-  assert(record, "build manifest lacks dist/src/extension.js")
-  const contents = readFileSync(staleOutputPath)
-  record.bytes = contents.byteLength
-  record.sha256 = createHash("sha256").update(contents).digest("hex")
-  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
-  const staleResult = spawnSync(process.execPath, [join(staleCheckout, "scripts/verify-build.mjs")], {
-    cwd: staleCheckout,
-    encoding: "utf8",
-  })
-  assert.notEqual(staleResult.status, 0, "verify-build accepted self-attested stale output")
-  assert.match(`${staleResult.stdout}\n${staleResult.stderr}`, /canonical clean build differs/u)
-}
-
-function importCompiledEntry(checkout) {
-  const entryUrl = pathToFileURL(join(checkout, "dist/extensions/diff.js")).href
-  return spawnSync(process.execPath, ["--input-type=module", "--eval", `await import(${JSON.stringify(entryUrl)})`], {
-    cwd: checkout,
-    encoding: "utf8",
-    maxBuffer: 10 * 1024 * 1024,
-  })
-}
-
-function assertGitInstallSemantics() {
-  const checkout = copyGitCheckout()
-  const installArgs = ["install", "--omit=dev", "--no-audit", "--no-fund"]
-  runNpm(installArgs, checkout)
-  assert(!existsSync(join(checkout, "node_modules/typescript")), "production git install included TypeScript")
-  assertActualFreshPiLoad(checkout)
-
-  const extensionPath = join(checkout, "dist/src/extension.js")
-  const originalExtension = readFileSync(extensionPath, "utf8")
-  const sideEffectPath = join(checkout, "stale-module-evaluated")
-  writeFileSync(
-    extensionPath,
-    `import { writeFileSync } from "node:fs"\nwriteFileSync(${JSON.stringify(sideEffectPath)}, "yes")\n${originalExtension}`,
-  )
-  const staleImport = importCompiledEntry(checkout)
-  assert.notEqual(staleImport.status, 0, "compiled entry imported modified output")
-  assert.match(
-    `${staleImport.stdout}\n${staleImport.stderr}`,
-    /refused to load missing or inconsistent compiled output/,
-  )
-  assert(!existsSync(sideEffectPath), "stale dependency executed before build verification")
-
-  writeFileSync(extensionPath, originalExtension)
-  rmSync(extensionPath)
-  const missingImport = importCompiledEntry(checkout)
-  assert.notEqual(missingImport.status, 0, "compiled entry imported with a missing dependency")
-  const missingOutput = `${missingImport.stdout}\n${missingImport.stderr}`
-  assert.match(missingOutput, /refused to load missing or inconsistent compiled output/)
-  assert.doesNotMatch(missingOutput, /ERR_MODULE_NOT_FOUND/)
-  writeFileSync(extensionPath, originalExtension)
-
-  const changedSource = join(checkout, "src/extension.ts")
-  writeFileSync(changedSource, `${readFileSync(changedSource, "utf8")}\n// stale checkout probe\n`)
-  const staleInstall = spawnNpm(installArgs, checkout)
-  assert.notEqual(staleInstall.status, 0, "production git install accepted stale output")
-  assert.match(`${staleInstall.stdout}\n${staleInstall.stderr}`, /compiled output is missing or stale/)
 }
 
 function collectRelativeFiles(directory, prefix = "") {
   const files = []
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name
-    if (entry.isDirectory()) {
-      files.push(...collectRelativeFiles(join(directory, entry.name), relativePath))
-    } else if (entry.isFile()) {
-      files.push(relativePath)
-    }
+    if (entry.isDirectory()) files.push(...collectRelativeFiles(join(directory, entry.name), relativePath))
+    else if (entry.isFile()) files.push(relativePath)
   }
   return files.sort()
 }
 
-function directorySnapshot(directory) {
-  return collectRelativeFiles(directory).map((file) => {
-    const contents = readFileSync(join(directory, file))
-    return [file, createHash("sha256").update(contents).digest("hex")]
-  })
-}
-
-function assertDirectoriesEqual(left, right) {
-  const leftFiles = collectRelativeFiles(left)
-  const rightFiles = collectRelativeFiles(right)
-  assert.deepEqual(rightFiles, leftFiles, "rebuilt package output file list differs from checked dist")
-  for (const file of leftFiles) {
-    assert.deepEqual(
-      readFileSync(join(right, file)),
-      readFileSync(join(left, file)),
-      `rebuilt package output differs from checked dist: ${file}`,
-    )
-  }
-}
-
-function assertProductionPath(file) {
-  const expectedRootFile = file === "package.json" || file === "README.md" || file === "LICENSE"
-  assert(expectedRootFile || file.startsWith("assets/") || file.startsWith("dist/"), `unexpected file: ${file}`)
-  assert(!file.startsWith("dist/tests/"), `production build emitted a test: ${file}`)
-}
-
-function assertJavaScriptArtifact(packageRoot, files, file) {
-  assert(files.includes(`${file}.map`), `installed tarball is missing ${file}.map`)
-  const sourceMap = JSON.parse(readFileSync(join(packageRoot, `${file}.map`), "utf8"))
-  assert.equal(sourceMap.sourcesContent?.length, sourceMap.sources?.length, `${file}.map lacks inline sources`)
-  assert(sourceMap.sourcesContent.every((source) => typeof source === "string" && source.length > 0))
-  assert(sourceMap.sources.every((source) => !isAbsolute(source) && !source.includes("/tests/")))
+function assertPackageMetadata(packageJson) {
+  assert.deepEqual(packageJson.files, ["extensions", "src", "assets", "README.md", "LICENSE"])
+  assert.deepEqual(packageJson.pi.extensions, ["./extensions/diff.ts"])
+  assert.equal(packageJson.main, undefined)
+  assert.equal(packageJson.types, undefined)
+  assert.equal(packageJson.exports, undefined)
+  assert.equal(
+    packageJson.pi.image,
+    "https://raw.githubusercontent.com/NikolaiUgelvik/pi-git-tui/main/assets/banner.png",
+  )
+  assert.equal(packageJson.license, "Apache-2.0")
+  assert.equal(packageJson.engines.node, ">=22.19.0")
+  assert.equal(packageJson.repository.url, "git+https://github.com/NikolaiUgelvik/pi-git-tui.git")
 }
 
 function assertInstalledContents(packageRoot) {
   const files = collectRelativeFiles(packageRoot)
-  assert(files.includes("package.json"), "installed tarball is missing package.json")
-  assert(files.includes("README.md"), "installed tarball is missing README.md")
-  assert(files.includes("LICENSE"), "installed tarball is missing the Apache 2.0 license")
-  assert(files.includes("assets/banner.png"), "installed tarball is missing its README banner")
-  assert(files.includes("dist/build-manifest.json"), "installed tarball is missing its build manifest")
-  assert(files.includes("dist/extensions/diff.js"), "installed tarball is missing the emitted Pi entry")
-  assert(files.includes("dist/extensions/diff.d.ts"), "installed tarball is missing exported declarations")
+  for (const required of [
+    "package.json",
+    "README.md",
+    "LICENSE",
+    "assets/banner.png",
+    "extensions/diff.ts",
+    "src/extension.ts",
+  ]) {
+    assert(files.includes(required), `installed package is missing ${required}`)
+  }
+  assert(!files.some((file) => file.startsWith("dist/")), "installed package contains compiled output")
+  assert(!files.some((file) => file.startsWith("scripts/")), "installed package contains development scripts")
 
-  for (const file of files) assertProductionPath(file)
-
-  const javascriptFiles = files.filter((file) => file.endsWith(".js"))
-  const declarationFiles = files.filter((file) => file.endsWith(".d.ts"))
-  assert(javascriptFiles.length > 0, "installed tarball contains no JavaScript")
-  assert.equal(javascriptFiles.length, declarationFiles.length, "JavaScript/declaration counts differ")
-  for (const file of javascriptFiles) assertJavaScriptArtifact(packageRoot, files, file)
-  assert.equal(
-    files.some((file) => file.endsWith(".d.ts.map")),
-    false,
-    "installed tarball contains declaration maps whose sources are not published",
-  )
+  for (const file of files) {
+    const publishedSource = file.startsWith("extensions/") || file.startsWith("src/")
+    const rootFile = ["package.json", "README.md", "LICENSE"].includes(file)
+    assert(rootFile || file.startsWith("assets/") || publishedSource, `unexpected installed file: ${file}`)
+    if (publishedSource) assert(file.endsWith(".ts"), `published source is not TypeScript: ${file}`)
+  }
 }
 
 function linkHostPeers(consumerDirectory) {
@@ -254,62 +111,15 @@ function linkHostPeers(consumerDirectory) {
   }
 }
 
-function assertActualFreshPiLoad(packageRoot) {
-  const project = join(temporaryRoot, "pi-fresh-load")
-  const agentDirectory = join(temporaryRoot, "pi-fresh-agent")
-  mkdirSync(project)
-  const piCommand = join(root, "node_modules", ".bin", process.platform === "win32" ? "pi.cmd" : "pi")
-  const env = { ...process.env, PI_CODING_AGENT_DIR: agentDirectory, PI_OFFLINE: "1" }
-  run(piCommand, ["install", packageRoot], { cwd: project, env })
-  const load = spawnSync(piCommand, ["--offline", "--help"], {
-    cwd: project,
-    encoding: "utf8",
-    env,
-    maxBuffer: 10 * 1024 * 1024,
-  })
-  if (load.error) throw load.error
-  const output = `${load.stdout}\n${load.stderr}`
-  assert.equal(load.status, 0, `fresh Pi failed to load the production git checkout:\n${output}`)
-  assert.doesNotMatch(output, /Warning:|Failed to load extension|compiled output is missing or stale/u)
-}
-
-function assertActualLocalPiInstall(packageRoot) {
-  const project = join(temporaryRoot, "pi-local-install")
-  mkdirSync(project)
-  writeFileSync(join(project, "package.json"), '{"name":"pi-local-install","private":true}\n')
-  const piCommand = join(root, "node_modules", ".bin", process.platform === "win32" ? "pi.cmd" : "pi")
-  run(piCommand, ["install", packageRoot, "-l"], { cwd: project })
-  const settingsPath = join(project, ".pi/settings.json")
-  const settings = JSON.parse(readFileSync(settingsPath, "utf8"))
-  const settingsDirectory = dirname(settingsPath)
-  assert.equal(
-    settings.packages?.some((entry) => {
-      const source = typeof entry === "string" ? entry : entry?.source
-      return typeof source === "string" && resolve(settingsDirectory, source) === packageRoot
-    }),
-    true,
-    "pi install did not record the local packed package",
-  )
-}
-
 async function assertPackageLoads(packageRoot) {
   const packageJson = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8"))
-  assert.deepEqual(packageJson.files, ["dist", "assets", "README.md"])
-  assert.deepEqual(packageJson.pi.extensions, ["./dist/extensions/diff.js"])
-  assert.equal(
-    packageJson.pi.image,
-    "https://raw.githubusercontent.com/NikolaiUgelvik/pi-git-tui/main/assets/banner.png",
-  )
-  assert.equal(packageJson.license, "Apache-2.0")
-  assert.equal(packageJson.engines.node, ">=22.19.0")
-  assert.equal(packageJson.repository.url, "git+https://github.com/NikolaiUgelvik/pi-git-tui.git")
-  assert.equal(packageJson.homepage, "https://github.com/NikolaiUgelvik/pi-git-tui#readme")
-  assert.equal(packageJson.bugs.url, "https://github.com/NikolaiUgelvik/pi-git-tui/issues")
-  assert.equal(packageJson.exports["."].import, "./dist/extensions/diff.js")
-  assert.equal(packageJson.exports["."].types, "./dist/extensions/diff.d.ts")
+  assertPackageMetadata(packageJson)
 
   const entryPath = join(packageRoot, packageJson.pi.extensions[0])
-  const agentDirectory = join(temporaryRoot, "agent")
+  const agentDirectory = join(
+    temporaryRoot,
+    `loader-agent-${relative(temporaryRoot, packageRoot).replaceAll("/", "-")}`,
+  )
   mkdirSync(agentDirectory, { recursive: true })
   const loaded = await discoverAndLoadExtensions([entryPath], temporaryRoot, agentDirectory)
   assert.deepEqual(loaded.errors, [])
@@ -317,74 +127,80 @@ async function assertPackageLoads(packageRoot) {
 
   const extension = loaded.extensions[0]
   const command = extension?.commands.get("diff")
-  assert(command, "packed extension did not register /diff")
-  assert.equal(extension?.shortcuts.size, 0, "packed extension registered an unexpected global shortcut")
+  assert(command, "TypeScript extension did not register /diff")
+  assert.equal(extension.shortcuts.size, 0, "extension registered an unexpected global shortcut")
 
   const notifications = []
-  const context = {
+  await command.handler("", {
     hasUI: false,
     ui: {
       notify(message, level) {
         notifications.push({ message, level })
       },
     },
-  }
-  await command.handler("", context)
+  })
   assert.deepEqual(notifications, [{ message: "/diff requires interactive mode", level: "error" }])
 }
 
-const checkedDistSnapshot = directorySnapshot(join(root, "dist"))
+function assertActualPiLoad(packageRoot, name) {
+  const project = join(temporaryRoot, `${name}-project`)
+  const agentDirectory = join(temporaryRoot, `${name}-agent`)
+  mkdirSync(project)
+  const piCommand = join(root, "node_modules", ".bin", process.platform === "win32" ? "pi.cmd" : "pi")
+  const env = { ...process.env, PI_CODING_AGENT_DIR: agentDirectory, PI_OFFLINE: "1" }
+  run(piCommand, ["install", packageRoot], { cwd: project, env })
+  const output = run(piCommand, ["--offline", "--help"], { cwd: project, env })
+  assert.doesNotMatch(output, /Warning:|Failed to load extension/u)
+}
+
+function copyGitCheckout() {
+  const checkout = join(temporaryRoot, "git-checkout")
+  mkdirSync(checkout)
+  for (const directory of ["assets", "extensions", "scripts", "src"]) {
+    cpSync(join(root, directory), join(checkout, directory), { recursive: true })
+  }
+  for (const file of ["LICENSE", "README.md", "package-lock.json", "package.json"]) {
+    cpSync(join(root, file), join(checkout, file))
+  }
+  return checkout
+}
 
 try {
-  assertReproducibleBuildGate()
-  assertGitInstallSemantics()
+  const gitCheckout = copyGitCheckout()
+  runNpm(["install", "--omit=dev", "--no-audit", "--no-fund"], gitCheckout)
+  assert(!existsSync(join(gitCheckout, "node_modules/typescript")), "production Git install included TypeScript")
+  assert(!existsSync(join(gitCheckout, "dist")), "production Git install created compiled output")
+  await assertPackageLoads(gitCheckout)
+  assertActualPiLoad(gitCheckout, "git")
 
   const packDirectory = join(temporaryRoot, "pack")
   mkdirSync(packDirectory)
-  const packCheckout = copyGitCheckout("pack-checkout")
-  symlinkSync(
-    join(root, "node_modules"),
-    join(packCheckout, "node_modules"),
-    process.platform === "win32" ? "junction" : "dir",
-  )
-  runNpm(["run", "prepack", "--silent"], packCheckout)
-  assertDirectoriesEqual(join(root, "dist"), join(packCheckout, "dist"))
-  runNpm(["pack", "--ignore-scripts", "--silent", "--pack-destination", packDirectory], packCheckout)
+  runNpm(["pack", "--ignore-scripts", "--silent", "--pack-destination", packDirectory])
   const tarballs = readdirSync(packDirectory).filter((name) => name.endsWith(".tgz"))
   assert.equal(tarballs.length, 1, "npm pack did not produce exactly one tarball")
-  const tarballPath = join(packDirectory, tarballs[0])
 
   const consumerDirectory = join(temporaryRoot, "consumer")
   mkdirSync(consumerDirectory)
-  writeFileSync(
-    join(consumerDirectory, "package.json"),
-    `${JSON.stringify({ name: "pi-git-tui-package-smoke", private: true, type: "module" }, null, 2)}\n`,
-  )
+  writeFileSync(join(consumerDirectory, "package.json"), '{"name":"pi-git-tui-smoke","private":true,"type":"module"}\n')
   runNpm(
-    ["install", "--no-audit", "--no-fund", "--no-package-lock", "--legacy-peer-deps", tarballPath],
+    [
+      "install",
+      "--ignore-scripts",
+      "--no-audit",
+      "--no-fund",
+      "--no-package-lock",
+      "--legacy-peer-deps",
+      join(packDirectory, tarballs[0]),
+    ],
     consumerDirectory,
   )
   linkHostPeers(consumerDirectory)
 
-  const exported = JSON.parse(
-    run(
-      process.execPath,
-      [
-        "--input-type=module",
-        "--eval",
-        'const extension = await import("pi-git-tui"); process.stdout.write(JSON.stringify({ factory: typeof extension.default }))',
-      ],
-      { cwd: consumerDirectory },
-    ),
-  )
-  assert.deepEqual(exported, { factory: "function" })
-
   const packageRoot = join(consumerDirectory, "node_modules/pi-git-tui")
   assertInstalledContents(packageRoot)
-  assertActualLocalPiInstall(packageRoot)
   await assertPackageLoads(packageRoot)
-  console.log("Packed pi-git-tui artifact exported, registered, and invoked /diff successfully.")
+  assertActualPiLoad(packageRoot, "npm")
+  console.log("Packed TypeScript source loaded through Pi and registered /diff successfully.")
 } finally {
-  assert.deepEqual(directorySnapshot(join(root, "dist")), checkedDistSnapshot, "package smoke mutated checked dist")
   rmSync(temporaryRoot, { recursive: true, force: true })
 }

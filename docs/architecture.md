@@ -129,7 +129,7 @@ All overlay controllers use `src/overlay-frame.ts`, while `viewer-overlay-base.t
 - **Viewer/frame**: `viewer.ts`, `viewer-core.ts`, `viewer-navigation-base.ts`, `viewer-frame.ts`, `viewer-overlay-coordinator.ts`, `responsive-geometry.ts`, `diff-viewport.ts`, `help-overlay-state.ts`, and overlay-specific viewer adapters.
 - **Overlay controllers**: commit, command, branch, stash, worktree, and settings controllers own local filtering, selection, and rendering state; `overlay-frame.ts` provides their shared bounded chrome.
 - **Parser/display**: diff parser, tree, structured diff display, render-cache, and ANSI terminal-column modules.
-- **Build/package**: production ESM is emitted to `dist/`; a hashed manifest, reproducible-build verifier, and packed-package smoke test prevent stale compiled installs. Source development remains available through `npm run dev`.
+- **Package loading**: Pi loads `extensions/diff.ts` and its source modules through its built-in jiti loader. The packed-package smoke test verifies npm and Git source installs without a production build.
 
 ## Testing strategy
 
@@ -155,4 +155,4 @@ Focused suites cover:
 - large untracked fan-out, deterministic ordering, process ceilings, aggregate budgets, abort behavior, race checks, binary files, large files, missing paths, directories, and symlinks;
 - porcelain-v2 equivalence for initial, detached, renamed, conflicted, submodule, linked-worktree, and unusual-path repositories;
 - status/full command refresh escalation and cache invalidation across staged/working views;
-- reproducible compiled output, packed installation, startup loading, and clean versus incremental developer-loop checks.
+- packed TypeScript source installation, startup loading, and clean versus incremental developer-loop checks.

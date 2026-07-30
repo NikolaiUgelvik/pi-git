@@ -179,12 +179,11 @@ npm run test:watch
 npm test
 npm run check
 
-# Rebuild and independently verify committed production output
-npm run build
-npm run verify:build
+# Verify the package and source extension
+npm run smoke:package
 ```
 
-Git installs use the committed `dist/` tree. `npm run verify:build` performs an isolated clean rebuild and byte-compares all production files so stale or mixed output fails before release.
+Pi loads `extensions/diff.ts` through its built-in jiti loader. npm and Git installs use the TypeScript source directly, so no production build is required.
 
 Performance fixtures are available through `benchmark:git`, `benchmark:render`, `benchmark:load`, and `benchmark:loop`.
 

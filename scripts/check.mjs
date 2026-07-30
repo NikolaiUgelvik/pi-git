@@ -8,7 +8,7 @@ const npmExecPath = process.env.npm_execpath
 const invocation = npmExecPath
   ? { command: process.execPath, prefix: [npmExecPath] }
   : { command: process.platform === "win32" ? "npm.cmd" : "npm", prefix: [] }
-const scripts = ["lint:ci", "test:coverage", "verify:build", "smoke:package", "fallow"]
+const scripts = ["lint:ci", "test:coverage", "smoke:package", "fallow"]
 
 try {
   for (const script of scripts) {

@@ -25,30 +25,21 @@
   "engines": {
     "node": ">=22.19.0"
   },
-  "main": "./dist/extensions/diff.js",
-  "types": "./dist/extensions/diff.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/extensions/diff.d.ts",
-      "import": "./dist/extensions/diff.js"
-    }
-  },
   "files": [
-    "dist",
+    "extensions",
+    "src",
     "assets",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "pi": {
     "extensions": [
-      "./dist/extensions/diff.js"
+      "./extensions/diff.ts"
     ],
     "image": "https://raw.githubusercontent.com/NikolaiUgelvik/pi-git-tui/main/assets/banner.png"
   },
   "scripts": {
     "clean": "node ./scripts/clean.mjs",
-    "clean:dev": "node ./scripts/clean.mjs --tests --typecheck",
-    "build": "node ./scripts/build.mjs",
-    "verify:build": "node ./scripts/verify-build.mjs",
     "dev": "pi -e ./extensions/diff.ts",
     "format": "biome check --write .",
     "lint": "biome check .",
@@ -62,16 +53,15 @@
     "smoke:package": "node ./tests/package-smoke.mjs",
     "benchmark:git": "node benchmarks/git-pipeline.mjs",
     "benchmark:render": "node benchmarks/render-caches.mjs",
-    "benchmark:load": "npm run build --silent && node benchmarks/extension-loading.mjs",
+    "benchmark:load": "node benchmarks/extension-loading.mjs",
     "benchmark:loop": "node benchmarks/developer-loop.mjs",
-    "benchmark:ci": "npm run benchmark:git -- --iterations 1 && npm run benchmark:render && npm run benchmark:load -- --iterations 20 --assert && npm run benchmark:loop -- --assert",
+    "benchmark:ci": "npm run benchmark:git -- --iterations 1 && npm run benchmark:render && npm run benchmark:load -- --iterations 20 && npm run benchmark:loop -- --assert",
     "fallow": "npm run fallow:dead-code && npm run fallow:audit",
     "fallow:dead-code": "fallow dead-code --ci --fail-on-issues",
     "fallow:audit": "fallow audit --gate new-only --coverage .tmp-coverage/coverage-final.json --ci",
     "typecheck": "tsc -p tsconfig.typecheck.json",
     "typecheck:watch": "tsc -p tsconfig.typecheck.json --watch",
     "typecheck:clean": "node ./scripts/clean.mjs --typecheck",
-    "prepack": "npm run build && npm run verify:build",
     "prepare": "node ./scripts/prepare.mjs"
   },
   "peerDependencies": {

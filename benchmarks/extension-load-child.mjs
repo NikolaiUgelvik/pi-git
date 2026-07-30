@@ -13,8 +13,8 @@ if (loaded.errors.length > 0) throw new Error(JSON.stringify(loaded.errors))
 if (loaded.extensions.length !== 1) throw new Error(`expected one extension, loaded ${loaded.extensions.length}`)
 
 const extension = loaded.extensions[0]
-if (!extension?.commands.has("diff") || extension.shortcuts.size !== 1) {
-  throw new Error("extension did not register /diff and one shortcut")
+if (!extension?.commands.has("diff") || extension.shortcuts.size !== 0) {
+  throw new Error("extension did not register only /diff")
 }
 
 process.stdout.write(`${JSON.stringify({ loadMs })}\n`)
